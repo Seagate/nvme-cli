@@ -433,7 +433,7 @@ thead, p.table.header {
 p.table {
   margin-top: 0;
 }
-/* Because the table frame attribute is overriden by CSS in most browsers. */
+/* Because the table frame attribute is overridden by CSS in most browsers. */
 div.tableblock > table[frame="void"] {
   border-style: none;
 }
@@ -752,7 +752,9 @@ nvme-discover(1) Manual Page
                 [--trsvcid=&lt;trsvcid&gt;      | -s &lt;trsvcid&gt;]
                 [--host-traddr=&lt;traddr&gt;   | -w &lt;traddr&gt;]
                 [--hostnqn=&lt;hostnqn&gt;      | -q &lt;hostnqn&gt;]
-                [--raw=&lt;filename&gt;         | -r &lt;filename&gt;]</pre>
+                [--raw=&lt;filename&gt;         | -r &lt;filename&gt;]
+                [--reconnect-delay=&lt;#&gt;    | -c &lt;#&gt;]
+                [--ctrl-loss-tmo=&lt;#&gt;      | -l &lt;#&gt;]</pre>
 <div class="attribution">
 </div></div>
 </div>
@@ -783,7 +785,7 @@ with specific information (such as network address and unique
 subsystem NQN) the NVMe Host can use to issue an
 NVMe connect command to connect itself to a storage resource
 contained in that NVMe subsystem on the NVMe Target.</p></div>
-<div class="paragraph"><p>Note that the base NVMe specfication defines the NQN (NVMe Qualified
+<div class="paragraph"><p>Note that the base NVMe specification defines the NQN (NVMe Qualified
 Name) format which an NVMe endpoint (device, subsystem, etc) must
 follow to guarantee a unique name under the NVMe standard.
 In particular, the Host NQN uniquely identifies the NVMe Host, and
@@ -903,6 +905,29 @@ cellspacing="0" cellpadding="4">
         dump the output to stdout.
 </p>
 </dd>
+<dt class="hdlist1">
+-c &lt;#&gt;
+</dt>
+<dt class="hdlist1">
+--reconnect-delay=&lt;#&gt;
+</dt>
+<dd>
+<p>
+        Overrides the default delay (in seconds) before reconnect is attempted
+        after a connect loss.
+</p>
+</dd>
+<dt class="hdlist1">
+-l &lt;#&gt;
+</dt>
+<dt class="hdlist1">
+--ctrl-loss-tmo=&lt;#&gt;
+</dt>
+<dd>
+<p>
+        Overrides the default controller loss timeout period (in seconds).
+</p>
+</dd>
 </dl></div>
 </div>
 </div>
@@ -966,7 +991,7 @@ for <a href="mailto:keith.busch@intel.com">Keith Busch</a>.</p></div>
 <div id="footnotes"><hr /></div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2018-06-05 09:00:22 MDT
+Last updated 2018-08-17 16:00:15 MDT
 </div>
 </div>
 </body>

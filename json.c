@@ -123,6 +123,7 @@ static struct json_value *json_create_value_string(const char *str)
 		if (!value->string) {
 			free(value);
 			value = NULL;
+			return value;
 		}
 	}
 	if (!value)
@@ -394,7 +395,7 @@ static void json_print_value(struct json_value *value, void *out)
 		printf( "%llu", value->uint_number);
 		break;
 	case JSON_TYPE_FLOAT:
-		printf( "%Lf", value->float_number);
+		printf( "%.0Lf", value->float_number);
 		break;
 	case JSON_TYPE_OBJECT:
 		json_print_object(value->object, out);

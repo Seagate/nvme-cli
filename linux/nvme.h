@@ -52,15 +52,17 @@ enum {
 enum {
 	NVMF_TRTYPE_RDMA	= 1,	/* RDMA */
 	NVMF_TRTYPE_FC		= 2,	/* Fibre Channel */
+	NVMF_TRTYPE_TCP		= 3,	/* TCP */
 	NVMF_TRTYPE_LOOP	= 254,	/* Reserved for host usage */
 	NVMF_TRTYPE_MAX,
 };
 
 /* Transport Requirements codes for Discovery Log Page entry TREQ field */
 enum {
-	NVMF_TREQ_NOT_SPECIFIED	= 0,	/* Not specified */
-	NVMF_TREQ_REQUIRED	= 1,	/* Required */
-	NVMF_TREQ_NOT_REQUIRED	= 2,	/* Not Required */
+	NVMF_TREQ_NOT_SPECIFIED	= 0,		/* Not specified */
+	NVMF_TREQ_REQUIRED	= 1,		/* Required */
+	NVMF_TREQ_NOT_REQUIRED	= 2,		/* Not Required */
+	NVMF_TREQ_DISABLE_SQFLOW = (1 << 2),	/* SQ flow control disable supported */
 };
 
 /* RDMA QP Service Type codes for Discovery Log Page entry TSAS
@@ -87,6 +89,13 @@ enum {
  */
 enum {
 	NVMF_RDMA_CMS_RDMA_CM	= 1, /* Sockets based endpoint addressing */
+};
+
+/* TCP port security type for  Discovery Log Page entry TSAS
+ */
+enum {
+	NVMF_TCP_SECTYPE_NONE	= 0, /* No Security */
+	NVMF_TCP_SECTYPE_TLS	= 1, /* Transport Layer Security */
 };
 
 #define NVME_AQ_DEPTH		32
@@ -241,7 +250,12 @@ struct nvme_id_ctrl {
 	__le32			hmminds;
 	__le16			hmmaxd;
 	__le16			nsetidmax;
-	__u8			rsvd340[172];
+	__u8			rsvd340[2];
+	__u8			anatt;
+	__u8			anacap;
+	__le32			anagrpmax;
+	__le32			nanagrpid;
+	__u8			rsvd352[160];
 	__u8			sqes;
 	__u8			cqes;
 	__le16			maxcmd;
@@ -253,11 +267,12 @@ struct nvme_id_ctrl {
 	__le16			awun;
 	__le16			awupf;
 	__u8			nvscc;
-	__u8			rsvd531;
+	__u8			nwpc;
 	__le16			acwu;
 	__u8			rsvd534[2];
 	__le32			sgls;
-	__u8			rsvd540[228];
+	__le32			mnan;
+	__u8			rsvd544[224];
 	char			subnqn[256];
 	__u8			rsvd1024[768];
 	__le32			ioccsz;
@@ -308,7 +323,7 @@ struct nvme_id_ns {
 	__u8			nmic;
 	__u8			rescap;
 	__u8			fpi;
-	__u8			rsvd33;
+	__u8			dlfeat;
 	__le16			nawun;
 	__le16			nawupf;
 	__le16			nacwu;
@@ -317,7 +332,10 @@ struct nvme_id_ns {
 	__le16			nabspf;
 	__le16			noiob;
 	__u8			nvmcap[16];
-	__u8			rsvd64[36];
+	__u8			rsvd64[28];
+	__le32			anagrpid;
+	__u8			rsvd96[3];
+	__u8			nsattr;
 	__le16			nvmsetid;
 	__le16			endgid;
 	__u8			nguid[16];
@@ -495,6 +513,20 @@ struct nvme_fw_slot_info_log {
 	__u8			rsvd64[448];
 };
 
+/* NVMe Namespace Write Protect State */
+enum {
+	NVME_NS_NO_WRITE_PROTECT = 0,
+	NVME_NS_WRITE_PROTECT,
+	NVME_NS_WRITE_PROTECT_POWER_CYCLE,
+	NVME_NS_WRITE_PROTECT_PERMANENT,
+};
+
+#define NVME_MAX_CHANGED_NAMESPACES     1024
+
+struct nvme_changed_ns_list_log {
+	__le32			log[NVME_MAX_CHANGED_NAMESPACES];
+};
+
 enum {
 	NVME_CMD_EFFECTS_CSUPP		= 1 << 0,
 	NVME_CMD_EFFECTS_LBCC		= 1 << 1,
@@ -508,6 +540,32 @@ struct nvme_effects_log {
 	__le32 acs[256];
 	__le32 iocs[256];
 	__u8   resv[2048];
+};
+
+enum nvme_ana_state {
+	NVME_ANA_OPTIMIZED		= 0x01,
+	NVME_ANA_NONOPTIMIZED		= 0x02,
+	NVME_ANA_INACCESSIBLE		= 0x03,
+	NVME_ANA_PERSISTENT_LOSS	= 0x04,
+	NVME_ANA_CHANGE			= 0x0f,
+};
+
+struct nvme_ana_group_desc {
+	__le32  grpid;
+	__le32  nnsids;
+	__le64  chgcnt;
+	__u8    state;
+	__u8    rsvd17[15];
+	__le32  nsids[];
+};
+
+/* flag for the log specific field of the ANA log */
+#define NVME_ANA_LOG_RGO   (1 << 0)
+
+struct nvme_ana_rsp_hdr {
+	__le64  chgcnt;
+	__le16  ngrps;
+	__le16  rsvd10[3];
 };
 
 enum {
@@ -524,6 +582,7 @@ enum {
 	NVME_AER_CSS			= 6,
 	NVME_AER_VS			= 7,
 	NVME_AER_NOTICE_NS_CHANGED	= 0x0002,
+	NVME_AER_NOTICE_ANA		= 0x0003,
 	NVME_AER_NOTICE_FW_ACT_STARTING = 0x0102,
 };
 
@@ -866,14 +925,17 @@ enum {
 	NVME_FEAT_HOST_ID	= 0x81,
 	NVME_FEAT_RESV_MASK	= 0x82,
 	NVME_FEAT_RESV_PERSIST	= 0x83,
+	NVME_FEAT_WRITE_PROTECT	= 0x84,
 	NVME_LOG_ERROR		= 0x01,
 	NVME_LOG_SMART		= 0x02,
 	NVME_LOG_FW_SLOT	= 0x03,
+	NVME_LOG_CHANGED_NS	= 0x04,
 	NVME_LOG_CMD_EFFECTS	= 0x05,
 	NVME_LOG_DEVICE_SELF_TEST = 0x06,
 	NVME_LOG_TELEMETRY_HOST = 0x07,
 	NVME_LOG_TELEMETRY_CTRL = 0x08,
 	NVME_LOG_ENDURANCE_GROUP = 0x09,
+	NVME_LOG_ANA		= 0x0c,
 	NVME_LOG_DISC		= 0x70,
 	NVME_LOG_RESERVATION	= 0x80,
 	NVME_LOG_SANITIZE	= 0x81,
@@ -885,6 +947,7 @@ enum {
 enum {
 	NVME_NO_LOG_LSP       = 0x0,
 	NVME_NO_LOG_LPO       = 0x0,
+	NVME_LOG_ANA_LSP_RGO  = 0x1,
 	NVME_TELEM_LSP_CREATE = 0x1,
 };
 
@@ -1033,7 +1096,7 @@ struct nvme_get_log_page_command {
 	__u64			rsvd2[2];
 	union nvme_data_ptr	dptr;
 	__u8			lid;
-	__u8			rsvd10;
+	__u8			lsp;
 	__le16			numdl;
 	__le16			numdu;
 	__u16			rsvd11;
@@ -1128,6 +1191,9 @@ struct nvmf_disc_rsp_page_entry {
 			__u16	pkey;
 			__u8	resv10[246];
 		} rdma;
+		struct tcp {
+			__u8	sectype;
+		} tcp;
 	} tsas;
 };
 
@@ -1277,6 +1343,8 @@ enum {
 	NVME_SC_SANITIZE_FAILED		= 0x1C,
 	NVME_SC_SANITIZE_IN_PROGRESS	= 0x1D,
 
+	NVME_SC_NS_WRITE_PROTECTED	= 0x20,
+
 	NVME_SC_LBA_RANGE		= 0x80,
 	NVME_SC_CAP_EXCEEDED		= 0x81,
 	NVME_SC_NS_NOT_READY		= 0x82,
@@ -1346,6 +1414,13 @@ enum {
 	NVME_SC_COMPARE_FAILED		= 0x285,
 	NVME_SC_ACCESS_DENIED		= 0x286,
 	NVME_SC_UNWRITTEN_BLOCK		= 0x287,
+
+	/*
+	 * Path-related Errors:
+	 */
+	NVME_SC_ANA_PERSISTENT_LOSS	= 0x301,
+	NVME_SC_ANA_INACCESSIBLE	= 0x302,
+	NVME_SC_ANA_TRANSITION		= 0x303,
 
 	NVME_SC_DNR			= 0x4000,
 };
