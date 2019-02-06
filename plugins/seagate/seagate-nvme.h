@@ -1,7 +1,7 @@
 //
 // Do NOT modify or remove this copyright and license
 //
-// Copyright (c) 2017-2018 Seagate Technology LLC and/or its Affiliates, All Rights Reserved
+// Copyright (c) 2017-2018 Seagate Technology LLC and/or its Affiliates
 //
 // ******************************************************************************************
 //

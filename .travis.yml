@@ -1,0 +1,11 @@
+language: c
+os: linux
+sudo: false
+compiler: gcc
+dist: xenial
+branches:
+    only:
+        - develop
+        - master
+#before_script: .configure
+script: make
