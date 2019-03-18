@@ -15,10 +15,14 @@ PLUGIN(NAME("wdc", "Western Digital vendor specific extensions"),
 		ENTRY("id-ctrl", "WDC identify controller", wdc_id_ctrl)
 		ENTRY("purge", "WDC Purge", wdc_purge)
 		ENTRY("purge-monitor", "WDC Purge Monitor", wdc_purge_monitor)
-		ENTRY("vs-internal-log", "WDC Internal Firmware Log", wdc_internal_fw_log)
-		ENTRY("smart-add-log", "WDC Additional Smart Log", wdc_smart_add_log)
-		ENTRY("clear-pcie-corr", "WDC Clear PCIe Correctable Error Count", wdc_clear_pcie_corr)
+		ENTRY("vs-internal-log", "WDC Internal Firmware Log", wdc_vs_internal_fw_log)
+		ENTRY("vs-nand-stats", "WDC NAND Statistics", wdc_vs_nand_stats)
+		ENTRY("vs-smart-add-log", "WDC Additional Smart Log", wdc_vs_smart_add_log)
+		ENTRY("clear-pcie-correctable-errors", "WDC Clear PCIe Correctable Error Count", wdc_clear_pcie_correctable_errors)
 		ENTRY("drive-essentials", "WDC Drive Essentials", wdc_drive_essentials)
+		ENTRY("get-drive-status", "WDC Get Drive Status", wdc_drive_status)
+		ENTRY("clear-assert-dump", "WDC Clear Assert Dump", wdc_clear_assert_dump)
+		ENTRY("drive-resize", "WDC Drive Resize", wdc_drive_resize)
 	)
 );
 

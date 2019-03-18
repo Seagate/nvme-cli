@@ -6,6 +6,8 @@
 #include "linux/nvme_ioctl.h"
 #include "nvme.h"
 
+#define NVME_IOCTL_TIMEOUT 120000 /* in milliseconds */
+
 int nvme_get_nsid(int fd);
 
 /* Generic passthrough */
@@ -105,8 +107,8 @@ int nvme_format(int fd, __u32 nsid, __u8 lbaf, __u8 ses, __u8 pi,
 		__u8 pil, __u8 ms, __u32 timeout);
 
 int nvme_ns_create(int fd, __u64 nsze, __u64 ncap, __u8 flbas,
-		   __u8 dps, __u8 nmic, __u32 *result);
-int nvme_ns_delete(int fd, __u32 nsid);
+		   __u8 dps, __u8 nmic, __u32 timeout, __u32 *result);
+int nvme_ns_delete(int fd, __u32 nsid, __u32 timeout);
 
 int nvme_ns_attachment(int fd, __u32 nsid, __u16 num_ctrls,
 		       __u16 *ctrlist, bool attach);
@@ -136,4 +138,5 @@ int nvme_sanitize(int fd, __u8 sanact, __u8 ause, __u8 owpass, __u8 oipbp,
 		  __u8 no_dealloc, __u32 ovrpat);
 int nvme_self_test_start(int fd, __u32 nsid, __u32 cdw10);
 int nvme_self_test_log(int fd, struct nvme_self_test_log *self_test_log);
+int nvme_virtual_mgmt(int fd, __u32 cdw10, __u32 cdw11, __u32 *result);
 #endif				/* _NVME_LIB_H */

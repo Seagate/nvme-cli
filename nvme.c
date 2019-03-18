@@ -1018,18 +1018,22 @@ static int delete_ns(int argc, char **argv, struct command *cmd, struct plugin *
 		"becomes inactive when that namespace is detached or, if "\
 		"the namespace is not already inactive, once deleted.";
 	const char *namespace_id = "namespace to delete";
+	const char *timeout = "timeout value, in milliseconds";
 	int err, fd;
 
 	struct config {
 		__u32	namespace_id;
+		__u32	timeout;
 	};
 
 	struct config cfg = {
 		.namespace_id    = 0,
+		.timeout      = NVME_IOCTL_TIMEOUT,
 	};
 
 	const struct argconfig_commandline_options command_line_options[] = {
 		{"namespace-id", 'n', "NUM",  CFG_POSITIVE, &cfg.namespace_id,    required_argument, namespace_id},
+		{"timeout", 't', "NUM", CFG_POSITIVE,  &cfg.timeout, required_argument, timeout},
 		{NULL}
 	};
 
@@ -1050,7 +1054,7 @@ static int delete_ns(int argc, char **argv, struct command *cmd, struct plugin *
 		goto close_fd;
 	}
 
-	err = nvme_ns_delete(fd, cfg.namespace_id);
+	err = nvme_ns_delete(fd, cfg.namespace_id, cfg.timeout);
 	if (!err)
 		printf("%s: Success, deleted nsid:%d\n", cmd->name,
 								cfg.namespace_id);
@@ -1163,8 +1167,11 @@ static int create_ns(int argc, char **argv, struct command *cmd, struct plugin *
 	const char *flbas = "FLBA size";
 	const char *dps = "data protection capabilities";
 	const char *nmic = "multipath and sharing capabilities";
+	const char *timeout = "timeout value, in milliseconds";
+	const char *bs = "target block size";
 
-	int err = 0, fd;
+	int err = 0, fd, i;
+	struct nvme_id_ns ns;
 	__u32 nsid;
 
 	struct config {
@@ -1173,17 +1180,24 @@ static int create_ns(int argc, char **argv, struct command *cmd, struct plugin *
 		__u8	flbas;
 		__u8	dps;
 		__u8	nmic;
+		__u64	bs;
+		__u32	timeout;
 	};
 
 	struct config cfg = {
+		.flbas = 0xff,
+		.bs = 0x00,
+		.timeout      = NVME_IOCTL_TIMEOUT,
 	};
 
 	const struct argconfig_commandline_options command_line_options[] = {
-		{"nsze",  's', "NUM", CFG_LONG_SUFFIX, &cfg.nsze,  required_argument, nsze},
-		{"ncap",  'c', "NUM", CFG_LONG_SUFFIX, &cfg.ncap,  required_argument, ncap},
-		{"flbas", 'f', "NUM", CFG_BYTE,        &cfg.flbas, required_argument, flbas},
-		{"dps",   'd', "NUM", CFG_BYTE,        &cfg.dps,   required_argument, dps},
-		{"nmic",  'm', "NUM", CFG_BYTE,        &cfg.nmic,  required_argument, nmic},
+		{"nsze",         's', "NUM", CFG_LONG_SUFFIX, &cfg.nsze,    required_argument, nsze},
+		{"ncap",         'c', "NUM", CFG_LONG_SUFFIX, &cfg.ncap,    required_argument, ncap},
+		{"flbas",        'f', "NUM", CFG_BYTE,        &cfg.flbas,   required_argument, flbas},
+		{"dps",          'd', "NUM", CFG_BYTE,        &cfg.dps,     required_argument, dps},
+		{"nmic",         'm', "NUM", CFG_BYTE,        &cfg.nmic,    required_argument, nmic},
+		{"block-size",   'b', "NUM", CFG_LONG_SUFFIX, &cfg.bs,      required_argument, bs},
+		{"timeout",      't', "NUM", CFG_POSITIVE,    &cfg.timeout, required_argument, timeout},
 		{NULL}
 	};
 
@@ -1191,7 +1205,48 @@ static int create_ns(int argc, char **argv, struct command *cmd, struct plugin *
 	if (fd < 0)
 		return fd;
 
-	err = nvme_ns_create(fd, cfg.nsze, cfg.ncap, cfg.flbas, cfg.dps, cfg.nmic, &nsid);
+	if (cfg.flbas != 0xff && cfg.bs != 0x00) {
+		fprintf(stderr,
+			"Invalid specification of both FLBAS and Block Size, please specify only one\n");
+			return EINVAL;
+	}
+	if (cfg.bs) {
+		if ((cfg.bs & (~cfg.bs + 1)) != cfg.bs) {
+			fprintf(stderr,
+				"Invalid value for block size (%"PRIu64"). Block size must be a power of two\n",
+				(uint64_t)cfg.bs);
+			return EINVAL;
+		}
+		err = nvme_identify_ns(fd, NVME_NSID_ALL, 0, &ns);
+		if (err) {
+			if (err < 0)
+				perror("identify-namespace");
+			else
+				fprintf(stderr,
+					"NVME Admin command error:%s(%x)\n",
+					nvme_status_to_string(err), err);
+			return err;
+		}
+		for (i = 0; i < 16; ++i) {
+			if ((1 << ns.lbaf[i].ds) == cfg.bs && ns.lbaf[i].ms == 0) {
+				cfg.flbas = i;
+				break;
+			}
+		}
+
+	}
+	if (cfg.flbas == 0xff) {
+		fprintf(stderr,
+			"FLBAS corresponding to block size %"PRIu64" not found\n",
+			(uint64_t)cfg.bs);
+		fprintf(stderr,
+			"Please correct block size, or specify FLBAS directly\n");
+		return EINVAL;
+	}
+
+
+	err = nvme_ns_create(fd, cfg.nsze, cfg.ncap, cfg.flbas, cfg.dps,
+			     cfg.nmic, cfg.timeout, &nsid);
 	if (!err)
 		printf("%s: Success, created nsid:%d\n", cmd->name, nsid);
 	else if (err > 0)
@@ -2148,6 +2203,74 @@ static int get_ns_id(int argc, char **argv, struct command *cmd, struct plugin *
 	return 0;
 }
 
+static int virtual_mgmt(int argc, char **argv, struct command *cmd, struct plugin *plugin)
+{
+	const char *desc  = "The Virtualization Management command is supported by primary controllers "\
+		"that support the Virtualization Enhancements capability.This command is used for "\
+		"1. Modifying Flexible Resource allocation for the primary controller  "\
+		"2. Assigning Flexible Resources for secondary controllers; and "\
+		"3. Setting the Online and Offline state for secondary controllers";
+	const char *cntlid = "This field indicates the controller for which controller resources "\
+		"are to be modified.";
+	const char *rt = "Indicate the Resource Type (RT) : \n"\
+		"1. 0 - VQ Resources.\n"\
+		"2. 1 - VI Resources.\n\n";
+	const char *act = "Indicate the Action (ACT) : \n"\
+		"1. 1 - Primary Controller Flexible Allocation\n"\
+		"2. 7 - Secondary Controller Offline\n"\
+		"3. 8 - Secondary Controller Assign\n"\
+		"4. 9 - Secondary Controller Online";
+	const char *nr = "Indicate the Number of Controller Resources (NR)";
+	int fd, err;
+	__u32 result;
+
+	struct config {
+		int     cntlid;
+		int     rt;
+		int     act;
+		__u32   cdw10;
+		__u32   cdw11;
+	};
+
+	struct config cfg = {
+		.cntlid	  = 0,
+		.rt	  = 0,
+		.act	  = 0,
+		.cdw10	  = 0,
+		.cdw11	  = 0,
+	};
+
+	const struct argconfig_commandline_options command_line_options[] = {
+		{"Controller-identifier",	   'c', "NUM", CFG_POSITIVE, &cfg.cntlid, required_argument, cntlid},
+		{"Resource-type",		   'r', "NUM", CFG_POSITIVE, &cfg.rt,     required_argument, rt},
+		{"Action",			   'a', "NUM", CFG_POSITIVE, &cfg.act,    required_argument, act},
+		{"Number-of-controller-resources", 'n', "NUM", CFG_POSITIVE, &cfg.cdw11,  required_argument, nr},
+		{NULL}
+	};
+
+	fd = parse_and_open(argc, argv, desc, command_line_options, &cfg, sizeof(cfg));
+	if (fd < 0)
+		return fd;
+
+	cfg.cdw10 = cfg.cntlid << 16;
+	cfg.cdw10 = cfg.cdw10 | (cfg.rt << 8);
+	cfg.cdw10 = cfg.cdw10 | cfg.act;
+
+	err = nvme_virtual_mgmt(fd, cfg.cdw10, cfg.cdw11, &result);
+	if (!err) {
+		printf("success, Number of Resources allocated:%#x\n", result);
+	}
+	else if (err > 0) {
+		fprintf(stderr, "NVMe Status:%s(%x)\n",
+				nvme_status_to_string(err), err);
+	} else
+		perror("virt-mgmt");
+
+	close(fd);
+	return err;
+
+}
+
 static int device_self_test(int argc, char **argv, struct command *cmd, struct plugin *plugin)
 {
 	const char *desc  = "Implementing the device self-test feature"\
@@ -2602,7 +2725,6 @@ static int subsystem_reset(int argc, char **argv, struct command *cmd, struct pl
 	err = nvme_subsystem_reset(fd);
 	if (err < 0) {
 		close(fd);
-		perror("Subsystem-reset");
 		if (errno == ENOTTY)
 			fprintf(stderr,
 				"Subsystem-reset: NVM Subsystem Reset not supported.\n");
@@ -2925,9 +3047,11 @@ static int format(int argc, char **argv, struct command *cmd, struct plugin *plu
 	const char *ms = "[0-1]: extended format off/on";
 	const char *reset = "Automatically reset the controller after successful format";
 	const char *timeout = "timeout value, in milliseconds";
+	const char *bs = "target block size";
 	struct nvme_id_ns ns;
-	int err, fd;
+	int err, fd, i;
 	__u8 prev_lbaf = 0;
+	__u8 lbads = 0;
 
 	struct config {
 		__u32 namespace_id;
@@ -2937,6 +3061,7 @@ static int format(int argc, char **argv, struct command *cmd, struct plugin *plu
 		__u8  pi;
 		__u8  pil;
 		__u8  ms;
+		__u64 bs;
 		int reset;
 	};
 
@@ -2947,6 +3072,7 @@ static int format(int argc, char **argv, struct command *cmd, struct plugin *plu
 		.ses          = 0,
 		.pi           = 0,
 		.reset        = 0,
+		.bs           = 0,
 	};
 
 	const struct argconfig_commandline_options command_line_options[] = {
@@ -2958,6 +3084,7 @@ static int format(int argc, char **argv, struct command *cmd, struct plugin *plu
 		{"pil",          'p', "NUM",  CFG_BYTE,     &cfg.pil,          required_argument, pil},
 		{"ms",           'm', "NUM",  CFG_BYTE,     &cfg.ms,           required_argument, ms},
 		{"reset",        'r', "",     CFG_NONE,     &cfg.reset,        no_argument,       reset},
+		{"block-size",   'b', "NUM",  CFG_LONG_SUFFIX, &cfg.bs,        required_argument, bs},
 		{NULL}
 	};
 
@@ -2965,6 +3092,19 @@ static int format(int argc, char **argv, struct command *cmd, struct plugin *plu
 	if (fd < 0)
 		return fd;
 
+	if (cfg.lbaf != 0xff && cfg.bs !=0) {
+		fprintf(stderr,
+			"Invalid specification of both LBAF and Block Size, please specify only one\n");
+			return EINVAL;
+	}
+	if (cfg.bs) {
+		if ((cfg.bs & (~cfg.bs + 1)) != cfg.bs) {
+			fprintf(stderr,
+				"Invalid value for block size (%"PRIu64"), must be a power of two\n",
+				       (uint64_t) cfg.bs);
+				return EINVAL;
+		}
+	}
 	if (S_ISBLK(nvme_stat.st_mode)) {
 		cfg.namespace_id = get_nsid(fd);
 		if (cfg.namespace_id == 0) {
@@ -2984,6 +3124,46 @@ static int format(int argc, char **argv, struct command *cmd, struct plugin *plu
 			return err;
 		}
 		prev_lbaf = ns.flbas & 0xf;
+
+		if (cfg.bs) {
+			for (i = 0; i < 16; ++i) {
+				if ((1ULL << ns.lbaf[i].ds) == cfg.bs &&
+				    ns.lbaf[i].ms == 0) {
+					cfg.lbaf = i;
+					break;
+				}
+			}
+			if (cfg.lbaf == 0xff) {
+				fprintf(stderr,
+					"LBAF corresponding to block size %"PRIu64"(LBAF %u) not found\n",
+					(uint64_t)cfg.bs, lbads);
+				fprintf(stderr,
+					"Please correct block size, or specify LBAF directly\n");
+				return EINVAL;
+			}
+		}
+	}
+	if (cfg.bs) {
+		__u64 bs = cfg.bs;
+		bs = bs >> 1;
+		while (bs) {
+			++lbads;
+			bs = bs >> 1;
+		}
+		for (i=0; i<16; ++i) {
+			if (ns.lbaf[i].ds == lbads && ns.lbaf[i].ms == 0) {
+				cfg.lbaf = i;
+				break;
+			}
+		}
+			if (cfg.lbaf == 0xff) {
+				fprintf(stderr,
+					"LBAF corresponding to block size %"PRIu64" (LBAF %u) not found\n",
+					(uint64_t)cfg.bs, lbads);
+				fprintf(stderr,
+					"Please correct block size, or specify LBAF directly\n");
+				return EINVAL;
+			}
 	}
 	if (cfg.lbaf == 0xff)
 		cfg.lbaf = prev_lbaf;
@@ -4134,7 +4314,7 @@ static int submit_io(int opcode, char *command, const char *desc,
 		dsmgmt |= ((__u32)cfg.dspec) << 16;
 	}
 
-	if (strlen(cfg.data)){
+	if (strlen(cfg.data)) {
 		dfd = open(cfg.data, flags, mode);
 		if (dfd < 0) {
 			perror(cfg.data);
@@ -4143,7 +4323,7 @@ static int submit_io(int opcode, char *command, const char *desc,
 		}
 		mfd = dfd;
 	}
-	if (strlen(cfg.metadata)){
+	if (strlen(cfg.metadata)) {
 		mfd = open(cfg.metadata, flags, mode);
 		if (mfd < 0) {
 			perror(cfg.metadata);
@@ -4233,14 +4413,16 @@ static int submit_io(int opcode, char *command, const char *desc,
 	if (err < 0)
 		perror("submit-io");
 	else if (err)
-		printf("%s:%s(%04x)\n", command, nvme_status_to_string(err), err);
+		fprintf(stderr, "%s:%s(%04x)\n", command, nvme_status_to_string(err), err);
 	else {
 		if (!(opcode & 1) && write(dfd, (void *)buffer, cfg.data_size) < 0) {
-			fprintf(stderr, "failed to write buffer to output file\n");
+			fprintf(stderr, "write: %s: failed to write buffer to output file\n",
+					strerror(errno));
 			err = EINVAL;
 		} else if (!(opcode & 1) && cfg.metadata_size &&
 				write(mfd, (void *)mbuffer, cfg.metadata_size) < 0) {
-			fprintf(stderr, "failed to write meta-data buffer to output file\n");
+			fprintf(stderr, "write: %s: failed to write meta-data buffer to output file\n",
+					strerror(errno));
 			err = EINVAL;
 		} else
 			fprintf(stderr, "%s: Success\n", command);
